@@ -52,3 +52,8 @@ app.post('/api/chat', async (req, res) => {
 });
 
 app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+setInterval(() => {
+  fetch('https://rag-based-llm-backend.onrender.com/health')
+    .then(() => console.log('keep-alive ping'))
+    .catch(() => {});
+}, 10 * 60 * 1000);
