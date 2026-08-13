@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const pdfParse = require('pdf-parse');
 const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...args));
 require('dotenv').config();
 
@@ -17,6 +18,43 @@ app.use(express.json({ limit: '20mb' }));
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
+const MAX_CHARS_PER_PDF = 30000;
+
+async function flatten(content) {
+  if (typeof content === 'string') return content;
+
+  const parts = [];
+
+  for (const block of content) {
+    if (block.type === 'text' && block.text) {
+      parts.push(block.text);
+    } else if (block.type === 'document' && block.source?.data) {
+      const title = block.title || 'document.pdf';
+      try {
+        const buffer = Buffer.from(block.source.data, 'base64');
+        const parsed = await pdfParse(buffer);
+        let text = (parsed.text || '').trim();
+
+        if (!text) {
+          parts.push(`--- ${title} ---\n[No extractable text. This PDF may be a scanned image.]`);
+          continue;
+        }
+
+        if (text.length > MAX_CHARS_PER_PDF) {
+          text = text.slice(0, MAX_CHARS_PER_PDF) + '\n[truncated]';
+        }
+
+        parts.push(`--- ${title} ---\n${text}`);
+      } catch (err) {
+        console.error('PDF parse failed for', title, err.message);
+        parts.push(`--- ${title} ---\n[Could not read this PDF.]`);
+      }
+    }
+  }
+
+  return parts.join('\n\n');
+}
+
 app.post('/api/chat', async (req, res) => {
   const { messages, system } = req.body;
 
@@ -28,17 +66,15 @@ app.post('/api/chat', async (req, res) => {
     return res.status(500).json({ error: 'Groq API key not configured on server' });
   }
 
-  const flatten = (content) =>
-    typeof content === 'string'
-      ? content
-      : content.map(c => c.text || '').filter(Boolean).join('\n');
-
-  const groqMessages = [
-    { role: 'system', content: system || 'You are a helpful assistant.' },
-    ...messages.map(m => ({ role: m.role, content: flatten(m.content) }))
-  ];
-
   try {
+    const groqMessages = [
+      { role: 'system', content: system || 'You are a helpful assistant.' }
+    ];
+
+    for (const m of messages) {
+      groqMessages.push({ role: m.role, content: await flatten(m.content) });
+    }
+
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
