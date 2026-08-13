@@ -1,6 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-const pdfParseModule = require('pdf-parse');
 const pdfParse = require('pdf-parse');
 const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...args));
 require('dotenv').config();
