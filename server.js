@@ -24,41 +24,43 @@ app.post('/api/chat', async (req, res) => {
     return res.status(400).json({ error: 'messages array is required' });
   }
 
-  if (!process.env.GEMINI_API_KEY) {
-    return res.status(500).json({ error: 'Gemini API key not configured on server' });
+  if (!process.env.GROQ_API_KEY) {
+    return res.status(500).json({ error: 'Groq API key not configured on server' });
   }
 
+  const flatten = (content) =>
+    typeof content === 'string'
+      ? content
+      : content.map(c => c.text || '').filter(Boolean).join('\n');
+
+  const groqMessages = [
+    { role: 'system', content: system || 'You are a helpful assistant.' },
+    ...messages.map(m => ({ role: m.role, content: flatten(m.content) }))
+  ];
+
   try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          system_instruction: {
-            parts: [{ text: system || 'You are a helpful assistant.' }]
-          },
-          contents: messages.map(m => ({
-            role: m.role === 'assistant' ? 'model' : 'user',
-            parts: [{
-              text: typeof m.content === 'string'
-                ? m.content
-                : m.content.map(c => c.text || '').join('\n')
-            }]
-          }))
-        })
-      }
-    );
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'authorization': `Bearer ${process.env.GROQ_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        max_tokens: 1024,
+        messages: groqMessages
+      })
+    });
 
     const data = await response.json();
 
     if (!response.ok) {
-      return res.status(response.status).json({ error: data.error?.message || 'Gemini API error' });
+      return res.status(response.status).json({ error: data.error?.message || 'Groq API error' });
     }
 
-    const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    const reply = data.choices?.[0]?.message?.content;
     if (!reply) {
-      return res.status(500).json({ error: 'No response from Gemini' });
+      return res.status(500).json({ error: 'No response from Groq' });
     }
 
     res.json({ content: [{ text: reply }] });
@@ -72,7 +74,7 @@ app.post('/api/chat', async (req, res) => {
 app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
 
 setInterval(() => {
-  fetch(`https://rag-based-llm-backend.onrender.com/health`)
+  fetch('https://rag-based-llm-backend.onrender.com/health')
     .then(() => console.log('keep-alive ping'))
     .catch(() => {});
 }, 10 * 60 * 1000);
