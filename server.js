@@ -24,33 +24,45 @@ app.post('/api/chat', async (req, res) => {
     return res.status(400).json({ error: 'messages array is required' });
   }
 
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return res.status(500).json({ error: 'API key not configured on server' });
+  if (!process.env.GEMINI_API_KEY) {
+    return res.status(500).json({ error: 'Gemini API key not configured on server' });
   }
 
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1024,
-        system: system || 'You are a helpful assistant.',
-        messages,
-      }),
-    });
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          system_instruction: {
+            parts: [{ text: system || 'You are a helpful assistant.' }]
+          },
+          contents: messages.map(m => ({
+            role: m.role === 'assistant' ? 'model' : 'user',
+            parts: [{
+              text: typeof m.content === 'string'
+                ? m.content
+                : m.content.map(c => c.text || '').join('\n')
+            }]
+          }))
+        })
+      }
+    );
 
     const data = await response.json();
 
     if (!response.ok) {
-      return res.status(response.status).json({ error: data.error?.message || 'Anthropic API error' });
+      return res.status(response.status).json({ error: data.error?.message || 'Gemini API error' });
     }
 
-    res.json(data);
+    const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!reply) {
+      return res.status(500).json({ error: 'No response from Gemini' });
+    }
+
+    res.json({ content: [{ text: reply }] });
+
   } catch (err) {
     console.error('Proxy error:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -58,8 +70,9 @@ app.post('/api/chat', async (req, res) => {
 });
 
 app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+
 setInterval(() => {
-  fetch('https://rag-based-llm-backend.onrender.com/health')
+  fetch(`https://rag-based-llm-backend.onrender.com/health`)
     .then(() => console.log('keep-alive ping'))
     .catch(() => {});
 }, 10 * 60 * 1000);
